@@ -90,7 +90,7 @@ enum PropAttr {
     Nullable,
 
     // ident [= expr]
-    Get(Option<syn::Expr>),
+    Get(Option<syn::Expr>, &'static str),
     Set(Option<syn::Expr>),
 
     // ident = expr
@@ -122,7 +122,8 @@ impl Parse for PropAttr {
             // name = expr | type | ident
             match &*name_str {
                 "name" => PropAttr::Name(input.parse()?),
-                "get" => PropAttr::Get(Some(input.parse()?)),
+                "get" => PropAttr::Get(Some(input.parse()?), ""),
+                "is" => PropAttr::Get(Some(input.parse()?), "is"),
                 "set" => PropAttr::Set(Some(input.parse()?)),
                 "override_class" => PropAttr::OverrideClass(input.parse()?),
                 "override_interface" => PropAttr::OverrideInterface(input.parse()?),
@@ -155,7 +156,8 @@ impl Parse for PropAttr {
             // attributes with only the identifier name
             match &*name_str {
                 "nullable" => PropAttr::Nullable,
-                "get" => PropAttr::Get(None),
+                "get" => PropAttr::Get(None, ""),
+                "is" => PropAttr::Get(None, "is"),
                 "set" => PropAttr::Set(None),
                 "readwrite" | "read_only" | "write_only" => {
                     return Err(syn::Error::new(
@@ -177,6 +179,7 @@ impl Parse for PropAttr {
 struct ReceivedAttrs {
     nullable: bool,
     get: Option<MaybeCustomFn>,
+    get_prefix: &'static str,
     set: Option<MaybeCustomFn>,
     override_class: Option<syn::Type>,
     override_interface: Option<syn::Type>,
@@ -203,7 +206,14 @@ impl ReceivedAttrs {
     fn set_from_attr(&mut self, attr: PropAttr) {
         match attr {
             PropAttr::Nullable => self.nullable = true,
-            PropAttr::Get(some_fn) => self.get = Some(some_fn.into()),
+            PropAttr::Get(some_fn, prefix) => {
+                if self.get.is_none() {
+                    self.get = Some(some_fn.into());
+                    self.get_prefix = prefix;
+                } else {
+                    self.get_prefix = "invalid";
+                }
+            },
             PropAttr::Set(some_fn) => self.set = Some(some_fn.into()),
             PropAttr::Name(lit) => self.name = Some(lit),
             PropAttr::OverrideClass(ty) => self.override_class = Some(ty),
@@ -231,6 +241,7 @@ struct PropDesc {
     override_interface: Option<syn::Type>,
     nullable: bool,
     get: Option<MaybeCustomFn>,
+    get_prefix: &'static str,
     set: Option<MaybeCustomFn>,
     member: Option<syn::Ident>,
     builder: Option<(Punctuated<syn::Expr, Token![,]>, TokenStream2)>,
@@ -247,6 +258,7 @@ impl PropDesc {
         let ReceivedAttrs {
             nullable,
             get,
+            get_prefix,
             set,
             override_class,
             override_interface,
@@ -261,6 +273,13 @@ impl PropDesc {
             return Err(syn::Error::new(
                 attrs_span,
                 "No `get` or `set` specified: at least one is required.".to_string(),
+            ));
+        }
+
+        if get_prefix == "invalid" {
+            return Err(syn::Error::new(
+                attrs_span,
+                "It's possible to use only one getter style `get` or `is`".to_string(),
             ));
         }
 
@@ -290,6 +309,7 @@ impl PropDesc {
             override_interface,
             nullable,
             get,
+            get_prefix,
             set,
             member,
             builder,
@@ -516,6 +536,12 @@ fn expand_wrapper_getset_properties(props: &[PropDesc]) -> TokenStream2 {
         let ty = &p.ty;
 
         let getter = p.get.is_some().then(|| {
+            let ident = 
+            if p.get_prefix.is_empty() {
+                ident.to_owned()
+            } else {
+                format_ident!("{}_{}", p.get_prefix, ident)
+            };
             quote!(pub fn #ident(&self) -> <#ty as #crate_ident::Property>::Value {
                  self.property::<<#ty as #crate_ident::Property>::Value>(#name)
             })

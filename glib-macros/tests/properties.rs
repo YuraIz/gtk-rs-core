@@ -154,6 +154,8 @@ mod foo {
             once_cell: OnceCell<u8>,
             #[property(get, set)]
             cell: Cell<u8>,
+            #[property(is, set)]
+            loop_: Cell<bool>,
             #[property(get = Self::overridden, override_class = Base)]
             overridden: PhantomData<u32>,
             #[property(get, set)]
@@ -322,6 +324,10 @@ fn props() {
         // custom
         let buzz = myfoo.buzz();
         assert_eq!(buzz, myfoo.property::<String>("buzz"));
+
+        // // boolean
+        let loop_ = myfoo.is_loop();
+        assert_eq!(loop_, myfoo.property::<bool>("loop"));
 
         // member of struct field
         let author_nick = myfoo.author_nick();
